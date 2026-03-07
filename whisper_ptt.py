@@ -61,8 +61,8 @@ def _env(key, default, *, type_=str):
 WHISPER_MODEL = _env("WHISPER_MODEL", "large-v3")
 WHISPER_DEVICE = _env("WHISPER_DEVICE", "cuda")
 WHISPER_COMPUTE_TYPE = _env("WHISPER_COMPUTE_TYPE", "float16")
-WHISPER_LANGUAGE = _env("WHISPER_LANGUAGE", "ru")
-WHISPER_INITIAL_PROMPT = _env("WHISPER_INITIAL_PROMPT", "Russian speech, possible English technical terms.")
+WHISPER_LANGUAGE = _env("WHISPER_LANGUAGE", "en")
+WHISPER_INITIAL_PROMPT = _env("WHISPER_INITIAL_PROMPT", "English speech.")
 
 # Hotkey (hold to record, release to stop)
 HOTKEY = _env("HOTKEY", "pause")

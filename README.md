@@ -56,7 +56,7 @@ Edit `.env` as needed. Main knobs:
 |----------|--------------|---------|
 | `WHISPER_PTT_WHISPER_MODEL` | Whisper model (`base`, `small`, `medium`, `large-v3`, `large-v3-turbo`) | `large-v3` |
 | `WHISPER_PTT_WHISPER_DEVICE` | Whisper device: `cuda` or `cpu` | `cuda` |
-| `WHISPER_PTT_WHISPER_LANGUAGE` | Whisper language (`ru`, `en`, …) | `ru` |
+| `WHISPER_PTT_WHISPER_LANGUAGE` | Whisper language (`en`, `ru`, …) | `en` |
 | `WHISPER_PTT_HOTKEY` | Hotkey (`pause`, `f9`, `f10`, `scroll lock`, …) | `pause` |
 | `WHISPER_PTT_USE_LLM_CLEANUP` | LLM cleanup | `true` (off: `false`, `0`, `no`, `off`) |
 | `WHISPER_PTT_OLLAMA_MODEL` | Ollama model (for LLM cleanup) | `gemma3:12b` |
@@ -70,7 +70,7 @@ Edit `.env` as needed. Main knobs:
 | Variable | What it does | Default |
 |----------|--------------|---------|
 | `WHISPER_PTT_WHISPER_COMPUTE_TYPE` | Whisper compute type: `float16`, `int8`, `float32` | `float16` |
-| `WHISPER_PTT_WHISPER_INITIAL_PROMPT` | Whisper initial prompt (e.g. language mix) | `Russian speech, possible English technical terms.` |
+| `WHISPER_PTT_WHISPER_INITIAL_PROMPT` | Whisper initial prompt (e.g. language hint) | `English speech.` |
 | `WHISPER_PTT_OLLAMA_URL` | Ollama URL | `http://localhost:11434/api/generate` |
 | `WHISPER_PTT_LLM_CLEANUP_PROMPT` | LLM cleanup prompt; placeholders `{detected_lang}`, `{raw_text}` | built-in |
 | `WHISPER_PTT_SAMPLE_RATE` | Sample rate | `16000` |
