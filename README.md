@@ -15,34 +15,62 @@ Hold a hotkey → speak → release → text appears. That's it.
 
 Voice-to-text tools shouldn't require blind trust. **Whisper-PTT** is a **single-file push-to-talk** utility: it turns your speech into text locally with Whisper, then optionally polishes it with an LLM pass (Ollama) — cleaning up filler words, fixing grammar, and adding punctuation. Both steps run fully offline; nothing leaves your machine. The whole source is short enough to read over coffee — you can verify exactly where your audio goes. **Hold a hotkey → speak → release** → clean text appears in your active window (or clipboard). That's it.
 
-Whisper transcribes locally; an optional second pass through an LLM cleans the result before it's pasted into the focused window. Everything is configurable via environment variables: Whisper model, hotkey, LLM model, cleanup prompt, paste vs clipboard-only, or turn off LLM entirely. A prebuffer captures the start of your speech so the first word isn't clipped. One Python file, a handful of dependencies — no build step, no daemon, no config files you didn't ask for.
-
 **PyPI?**
 
 > *Whisper-PTT is intentionally not on PyPI. The point is that you can read the entire source before running it. `pip install` would undermine that.*
 
-Clone → open → read → run: you can audit the code in a few minutes. Publishing to PyPI would scatter files into `site-packages` and add a layer of abstraction between you and the code — the opposite of "one file, zero blind trust." Same philosophy as other single-file, audit-friendly tools: you see what you run.
+Clone → open → read → run: you can audit the code in a few minutes. Publishing to PyPI would scatter files into `site-packages` and add a layer of abstraction between you and the code — the opposite of "one file, zero blind trust."
+
+---
+
+## Platform files
+
+Whisper-PTT requires GPU acceleration — there is no CPU-only mode. The tool ships as **two standalone scripts**, one per platform. Each file is a complete, self-contained tool with zero shared imports between them. This is intentional: the goal is minimal code you can audit in one sitting, not a framework with layers of abstraction. Different platforms need different Whisper backends, different paste mechanisms, and different audio quirks — splitting keeps each file focused and short.
+
+| Platform | Script | Whisper backend | Accelerator |
+|----------|--------|-----------------|-------------|
+| **Windows / Linux** | `whisper_ptt_cuda.py` | [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2) | NVIDIA CUDA |
+| **macOS** | `whisper_ptt_apple_silicon.py` | [mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper) (MLX) | Apple Silicon Metal |
+
+Pick the file for your platform and ignore the other one. They share the same `.env` config format and the same workflow (prebuffer → Whisper → optional LLM cleanup → paste).
 
 ---
 
 ## Quick start
 
-> **Tested on Windows.** Linux and macOS should work; on Linux the `keyboard` library typically needs root for global hotkeys (`sudo`).
-> The pinned `requirements.txt` was generated on Windows with CUDA; on CPU-only or other platforms you may use the minimal install (see step 1).
+### Windows / Linux (NVIDIA CUDA)
 
-**1. Clone and install**
+Requires an **NVIDIA GPU** with CUDA support.
 
 ```bash
 git clone https://github.com/yourname/whisper-ptt.git
 cd whisper-ptt
 python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-cuda.txt
+cp .env.example-cuda .env       # edit as needed
+python whisper_ptt_cuda.py
 ```
 
-Requires **Python 3.9+**. The repo ships a pinned `requirements.txt` for reproducible installs. If you prefer minimal deps or hit conflicts (e.g. CPU-only), install the core ones: `pip install faster-whisper pyaudio keyboard pyperclip requests`. Optional: `pip install python-dotenv` to load config from a `.env` file; without it, only environment variables are used, and if a `.env` file exists the script will print a note to install python-dotenv.
+On Linux, the `keyboard` library typically needs root for global hotkeys (`sudo python whisper_ptt_cuda.py`).
 
-**2. (Optional) Ollama for LLM cleanup**
+### macOS Apple Silicon (M1/M2/M3/M4)
+
+Requires an **Apple Silicon** Mac.
+
+```bash
+git clone https://github.com/yourname/whisper-ptt.git
+cd whisper-ptt
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements-apple-silicon.txt
+cp .env.example-apple-silicon .env   # edit as needed
+sudo python whisper_ptt_apple_silicon.py
+```
+
+`sudo` is required because the `keyboard` library needs root to listen for global hotkeys on macOS. The first run downloads the Whisper model from HuggingFace (mlx-community). Inference runs on Metal — no CUDA needed.
+
+### (Optional) Ollama for LLM cleanup
 
 ```bash
 # Install: https://ollama.com/download
@@ -51,61 +79,54 @@ ollama pull gemma3:12b
 
 Skip this and set `WHISPER_PTT_USE_LLM_CLEANUP=false` in `.env` if you only want raw Whisper output.
 
-**3. Configure**
+---
+
+## Configuration
+
+All config is via `WHISPER_PTT_*` environment variables or a `.env` file. Both scripts read the same variable names.
 
 ```bash
-cp .env.example .env
+cp .env.example-cuda .env                  # Windows / Linux
+cp .env.example-apple-silicon .env         # macOS Apple Silicon
 ```
 
-Edit `.env` as needed. Main knobs:
+### Main settings
 
 | Variable | What it does | Default |
 |----------|--------------|---------|
-| `WHISPER_PTT_WHISPER_MODEL` | Whisper model (`base`, `small`, `medium`, `large-v3`, `large-v3-turbo`) | `large-v3` |
-| `WHISPER_PTT_WHISPER_DEVICE` | Whisper device: `cuda` or `cpu` | `cuda` |
-| `WHISPER_PTT_WHISPER_LANGUAGE` | Whisper language (`en`, `ru`, …) | `en` |
-| `WHISPER_PTT_HOTKEY` | Hotkey: default `ctrl+f12` (Win/Linux) or `cmd+f12` (macOS). Single-key option: `pause` if your keyboard has it. | `ctrl+f12` / `cmd+f12` |
-| `WHISPER_PTT_USE_LLM_CLEANUP` | LLM cleanup | `true` (off: `false`, `0`, `no`, `off`) |
-| `WHISPER_PTT_OLLAMA_MODEL` | Ollama model (for LLM cleanup) | `gemma3:12b` |
-| `WHISPER_PTT_COPY_TO_CLIPBOARD` | Copy to clipboard | `true` (same on/off values as above) |
-| `WHISPER_PTT_PASTE_TO_ACTIVE_WINDOW` | Paste to active window | `true` (same on/off values as above) |
-| `WHISPER_PTT_CLIPBOARD_AFTER_PASTE_POLICY` | Clipboard after paste (see below). Only applies when Paste is on. Must be exactly one of: `restore`, `clear`, `preserve`. | `restore` |
-| `WHISPER_PTT_KEYS_AFTER_PASTE` | Keys after paste: key(s) to send (`enter`, `ctrl+enter`, or empty/`none`) | `enter` |
-
-**Clipboard after paste** (only when **Paste to active window** is on): the app uses the clipboard to paste, then applies the policy. **restore** (default) — put back what was in the clipboard before this round, so your clipboard history is not lost. **clear** — empty the clipboard after pasting. **preserve** — leave the transcription in the clipboard. If you set this variable, it must be exactly one of these three; any other value is invalid and the app will exit with an error. When Paste is off, clipboard is only controlled by **Copy to clipboard** (copy or not).
+| `WHISPER_PTT_WHISPER_MODEL` | Whisper model (`tiny`, `base`, `small`, `medium`, `large-v3`, `large-v3-turbo`) | `large-v3` (CUDA), `large-v3-turbo` (Apple Silicon) |
+| `WHISPER_PTT_WHISPER_LANGUAGE` | Whisper language code (`en`, `ru`, `de`, `fr`, …) | `en` |
+| `WHISPER_PTT_HOTKEY` | Hotkey (hold to record). Combos like `ctrl+f12` also work. | `ctrl` (CUDA), `cmd` (Apple Silicon) |
+| `WHISPER_PTT_USE_LLM_CLEANUP` | LLM cleanup on/off | `true` |
+| `WHISPER_PTT_OLLAMA_MODEL` | Ollama model for cleanup | `gemma3:12b` |
+| `WHISPER_PTT_COPY_TO_CLIPBOARD` | Copy result to clipboard | `true` |
+| `WHISPER_PTT_PASTE_TO_ACTIVE_WINDOW` | Paste into the focused window | `true` |
+| `WHISPER_PTT_CLIPBOARD_AFTER_PASTE_POLICY` | After paste: `restore` (default), `clear`, or `preserve` | `restore` |
+| `WHISPER_PTT_KEYS_AFTER_PASTE` | Key(s) to send after paste (`enter`, `ctrl+enter`, or `none`) | `enter` |
 
 <details>
 <summary>All other variables (audio, prebuffer, advanced)</summary>
 
 | Variable | What it does | Default |
 |----------|--------------|---------|
-| `WHISPER_PTT_WHISPER_COMPUTE_TYPE` | Whisper compute type: `float16`, `int8`, `float32` | `float16` |
-| `WHISPER_PTT_WHISPER_INITIAL_PROMPT` | Whisper initial prompt (e.g. language hint) | `English speech.` |
-| `WHISPER_PTT_OLLAMA_URL` | Ollama URL | `http://localhost:11434/api/generate` |
-| `WHISPER_PTT_LLM_CLEANUP_PROMPT` | LLM cleanup prompt; placeholders `{detected_lang}`, `{raw_text}` | built-in |
-| `WHISPER_PTT_SAMPLE_RATE` | Sample rate | `16000` |
-| `WHISPER_PTT_CHUNK_SIZE` | Chunk size | `1024` |
-| `WHISPER_PTT_PREBUFFER_SEC` | Prebuffer (sec; captures first word) | `0.5` |
-| `WHISPER_PTT_PADDING_SEC` | Padding (sec; silence before Whisper) | `0.2` |
-| `WHISPER_PTT_MIN_FRAMES` | Min frames (skip accidental taps) | `5` |
+| `WHISPER_PTT_WHISPER_INITIAL_PROMPT` | Whisper initial prompt (language hint) | `English speech.` |
+| `WHISPER_PTT_OLLAMA_URL` | Ollama API URL | `http://localhost:11434/api/generate` |
+| `WHISPER_PTT_LLM_CLEANUP_PROMPT` | Custom LLM prompt; placeholders `{detected_lang}`, `{raw_text}` | built-in |
+| `WHISPER_PTT_SAMPLE_RATE` | Sample rate (Hz) | `16000` |
+| `WHISPER_PTT_CHUNK_SIZE` | Audio chunk size | `1024` |
+| `WHISPER_PTT_PREBUFFER_SEC` | Prebuffer duration (captures the first word) | `0.5` |
+| `WHISPER_PTT_PADDING_SEC` | Silence padding before Whisper | `0.2` |
+| `WHISPER_PTT_MIN_FRAMES` | Min frames to process (skip accidental taps) | `5` |
 
 </details>
 
-**4. Run**
-
-```bash
-python whisper_ptt.py
-```
-
-First run may download the Whisper model (size depends on the model you chose). No CUDA? Set `WHISPER_PTT_WHISPER_DEVICE=cpu` in `.env`.
-
-**5. Use**
-
-Default hotkey: **ctrl+f12** (Windows/Linux) or **cmd+f12** (macOS). Hold it → speak → release. You can set `WHISPER_PTT_HOTKEY=pause` in `.env` for a single-key option if your keyboard has a Pause key. Text is pasted into the active window (and Enter is sent if enabled). Exit with **Esc** or Ctrl+C.
-
 ---
 
-## Use cases
+## Usage
+
+Default hotkey: **Ctrl** (Windows/Linux) or **Cmd** (macOS). Hold → speak → release. Text is pasted into the active window (and Enter is sent if configured). Exit with **Esc** or Ctrl+C.
+
+### Use cases
 
 - **Chats / AI assistants** — speak a message, get it pasted and sent (Cursor, Slack, Discord).
 - **Any text field** — focus the field, hold hotkey, speak, release.
@@ -117,20 +138,17 @@ Default hotkey: **ctrl+f12** (Windows/Linux) or **cmd+f12** (macOS). Hold it →
 
 ```
 whisper-ptt/
-  whisper_ptt.py     # single entrypoint
-  requirements.txt   # pinned dependencies (or use minimal: see Quick start)
-  .env.example       # config template
-  .env               # your config (optional)
+  whisper_ptt_cuda.py              # Windows / Linux  (faster-whisper + NVIDIA CUDA)
+  whisper_ptt_apple_silicon.py     # macOS  (mlx-whisper + Apple Silicon Metal)
+  requirements-cuda.txt            # pinned deps — CUDA
+  requirements-apple-silicon.txt   # deps — Apple Silicon
+  .env.example-cuda                # config template — CUDA
+  .env.example-apple-silicon       # config template — Apple Silicon
+  .env                             # your config (git-ignored)
   README.md
 ```
 
-One script, clear sections (config, prebuffer, transcription, LLM, paste, hotkeys). Easy to audit and adapt.
-
----
-
-## Dependencies
-
-The included `requirements.txt` uses **strict pins** (`==`) so that `pip install -r requirements.txt` gives a reproducible environment. For an open-source app this is a common choice: "clone and run" behaves the same for everyone. If you prefer looser versions (e.g. `faster-whisper>=1.0`, `pyaudio>=0.2.12`) for easier integration with other projects, keep a minimal list of direct deps with `>=` and omit the lockfile, or maintain both a minimal `requirements.in` and a generated pinned `requirements.txt`. The current file was frozen from a Windows + CUDA environment; CPU-only or other platforms can install the core packages by hand (see Quick start step 1).
+Each script is self-contained with clear sections (config, prebuffer, transcription, LLM, paste, hotkeys). One file per platform — easy to audit and adapt.
 
 ---
 

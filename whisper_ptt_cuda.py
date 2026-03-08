@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Whisper-PTT: push-to-talk voice-to-text. Hold hotkey → speak → release → transcription pasted into the active window.
+Whisper-PTT (CUDA): push-to-talk voice-to-text using faster-whisper on CUDA.
+Hold hotkey → speak → release → transcription pasted into the active window.
 
-Config: WHISPER_PTT_* env vars or .env file (see .env.example). Optional: pip install python-dotenv to load .env.
+Config: WHISPER_PTT_* env vars or .env file (see .env.example-cuda).
 
 Dependencies: faster_whisper, pyaudio, keyboard, pyperclip, requests.
 Optional: Ollama for LLM cleanup.
@@ -10,7 +11,6 @@ Optional: Ollama for LLM cleanup.
 
 import io
 import os
-import platform
 import wave
 import time
 import threading
@@ -58,16 +58,13 @@ def _env(key, default, *, type_=str):
 # Config (from env; values below are defaults)
 # -----------------------------------------------------------------------------
 
-# Whisper
+# Whisper (CUDA only — no CPU fallback)
 WHISPER_MODEL = _env("WHISPER_MODEL", "large-v3")
-WHISPER_DEVICE = _env("WHISPER_DEVICE", "cuda")
-WHISPER_COMPUTE_TYPE = _env("WHISPER_COMPUTE_TYPE", "float16")
 WHISPER_LANGUAGE = _env("WHISPER_LANGUAGE", "en")
 WHISPER_INITIAL_PROMPT = _env("WHISPER_INITIAL_PROMPT", "English speech.")
 
-# Hotkey (hold to record, release to stop). Default: ctrl+f12 (Windows/Linux), cmd+f12 (macOS)
-_default_hotkey = "cmd+f12" if platform.system() == "Darwin" else "ctrl+f12"
-HOTKEY = _env("HOTKEY", _default_hotkey).strip().lower().replace(" ", "")
+# Hotkey (hold to record, release to stop). Default: ctrl
+HOTKEY = _env("HOTKEY", "ctrl").strip().lower().replace(" ", "")
 # Parse combo (e.g. "ctrl+f12" -> ("ctrl", "f12")) for hook; single key -> (None, hotkey)
 if "+" in HOTKEY:
     _parts = HOTKEY.split("+", 1)
@@ -361,8 +358,8 @@ def main():
     print("⏳ Loading Whisper model... (first run may download the model)")
     _whisper_model = WhisperModel(
         WHISPER_MODEL,
-        device=WHISPER_DEVICE,
-        compute_type=WHISPER_COMPUTE_TYPE,
+        device="cuda",
+        compute_type="float16",
     )
     print("✅ Whisper loaded!")
 
