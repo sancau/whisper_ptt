@@ -6,7 +6,7 @@ Hold hotkey -> speak -> release -> transcription pasted into the active window.
 Config: WHISPER_PTT_* env vars or .env file (see .env.example-apple-silicon).
 
 Dependencies: mlx-whisper, pyaudio, keyboard, pyperclip, requests.
-Optional: Ollama for LLM cleanup.
+Optional: Ollama for LLM transform.
 """
 
 import os
@@ -70,11 +70,11 @@ if "+" in HOTKEY:
 else:
     HOTKEY_MODIFIER, HOTKEY_KEY = None, HOTKEY
 
-# LLM cleanup (Ollama) — optional, OFF by default
-USE_LLM_CLEANUP = _env("USE_LLM_CLEANUP", "false", type_=bool)
+# LLM transform (Ollama) — optional, OFF by default
+USE_LLM_TRANSFORM = _env("USE_LLM_TRANSFORM", "false", type_=bool)
 OLLAMA_MODEL = _env("OLLAMA_MODEL", "gemma3:12b")
 OLLAMA_URL = _env("OLLAMA_URL", "http://localhost:11434/api/generate")
-DEFAULT_LLM_CLEANUP_PROMPT = """Fix the following speech-to-text transcription. Rules:
+DEFAULT_LLM_TRANSFORM_PROMPT = """Fix the following speech-to-text transcription. Rules:
 - Fix grammar, punctuation, and capitalization
 - Remove filler words (um, uh, like, etc.)
 - Keep the original language ({detected_lang})
@@ -83,7 +83,7 @@ DEFAULT_LLM_CLEANUP_PROMPT = """Fix the following speech-to-text transcription. 
 - Return ONLY the cleaned text, nothing else
 
 Transcription: {raw_text}"""
-LLM_CLEANUP_PROMPT = _env("LLM_CLEANUP_PROMPT", DEFAULT_LLM_CLEANUP_PROMPT)
+LLM_TRANSFORM_PROMPT = _env("LLM_TRANSFORM_PROMPT", DEFAULT_LLM_TRANSFORM_PROMPT)
 
 # Output: copy to clipboard and/or paste to active window
 COPY_TO_CLIPBOARD = _env("COPY_TO_CLIPBOARD", "true", type_=bool)
@@ -257,13 +257,13 @@ def transcribe(audio_np):
     return text, lang
 
 
-def cleanup_with_llm(raw_text, detected_lang):
-    """LLM cleanup: fix punctuation, capitalization, remove filler words (Ollama)."""
+def transform_with_llm(raw_text, detected_lang):
+    """LLM transform: post-process transcription via Ollama."""
     if not raw_text.strip():
         return raw_text
-    print("🧹 LLM cleanup...")
+    print("🔄 LLM transform...")
     t0 = time.time()
-    prompt = LLM_CLEANUP_PROMPT.format(detected_lang=detected_lang, raw_text=raw_text)
+    prompt = LLM_TRANSFORM_PROMPT.format(detected_lang=detected_lang, raw_text=raw_text)
     try:
         r = requests.post(
             OLLAMA_URL,
@@ -401,8 +401,8 @@ def _transcription_worker():
             break
         audio_np = frames_to_numpy(frames, prepend_silence_sec=PADDING_SEC)
         raw_text, lang = transcribe(audio_np)
-        if USE_LLM_CLEANUP and raw_text.strip():
-            final_text = cleanup_with_llm(raw_text, lang)
+        if USE_LLM_TRANSFORM and raw_text.strip():
+            final_text = transform_with_llm(raw_text, lang)
         else:
             final_text = raw_text
         paste_to_front(final_text)
@@ -527,7 +527,7 @@ def _format_banner():
         line("") + "\n",
         line(f'     Hotkey: "{HOTKEY.upper()}" (hold to record, release to transcribe)') + "\n",
         line(f"     Model: {_mlx_model_path}") + "\n",
-        line(f"     LLM cleanup: {'ON' if USE_LLM_CLEANUP else 'OFF'}") + "\n",
+        line(f"     LLM transform: {'ON' if USE_LLM_TRANSFORM else 'OFF'}") + "\n",
         line(f"     Copy to clipboard: {'ON' if COPY_TO_CLIPBOARD else 'OFF'}") + "\n",
         line(f"     Paste to active window: {'ON' if PASTE_TO_ACTIVE_WINDOW else 'OFF'}") + "\n",
     ]

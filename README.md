@@ -2,7 +2,7 @@
 
 Local push-to-talk voice-to-text using Whisper. Fully offline — nothing leaves your machine.
 
-Hold a hotkey, speak, release. Transcribed text is pasted into the active window (or copied to clipboard). Optionally, a local LLM (Ollama) can clean up filler words, fix grammar, and add punctuation.
+Hold a hotkey, speak, release. Transcribed text is pasted into the active window (or copied to clipboard). Optionally, a local LLM (Ollama) can transform the output — fix grammar, reformat as an email, translate, or anything else you can describe in a prompt.
 
 <p align="center"><img src="assets/demo.gif" alt="Whisper-PTT demo" width="820"></p>
 
@@ -49,7 +49,7 @@ python whisper_ptt_apple_silicon.py
 
 macOS will prompt for **Accessibility** and **Input Monitoring** permissions on first run. Grant those and run **without** `sudo`. The Whisper model is downloaded from HuggingFace on first launch.
 
-### LLM cleanup (optional, off by default)
+### LLM transform (optional, off by default)
 
 If you want Ollama-based post-processing:
 
@@ -58,7 +58,7 @@ If you want Ollama-based post-processing:
 ollama pull gemma3:12b
 ```
 
-Set `WHISPER_PTT_USE_LLM_CLEANUP=true` in `.env` to enable.
+Set `WHISPER_PTT_USE_LLM_TRANSFORM=true` in `.env` to enable. The default prompt cleans up grammar and filler words; replace it via `WHISPER_PTT_LLM_TRANSFORM_PROMPT` to translate, reformat, or do anything else.
 
 ---
 
@@ -71,8 +71,8 @@ All settings are read from `WHISPER_PTT_*` environment variables or a `.env` fil
 | `WHISPER_PTT_WHISPER_MODEL` | Whisper model (`tiny`, `base`, `small`, `medium`, `large-v3`, `large-v3-turbo`) | `large-v3` / `large-v3-turbo` |
 | `WHISPER_PTT_WHISPER_LANGUAGE` | Language code (`en`, `ru`, `de`, `fr`, ...) | `en` |
 | `WHISPER_PTT_HOTKEY` | Hold-to-record key. Combos like `alt+f12` work. | `alt` / `option` |
-| `WHISPER_PTT_USE_LLM_CLEANUP` | Enable LLM cleanup | `false` |
-| `WHISPER_PTT_OLLAMA_MODEL` | Ollama model for cleanup | `gemma3:12b` |
+| `WHISPER_PTT_USE_LLM_TRANSFORM` | Enable LLM transform | `false` |
+| `WHISPER_PTT_OLLAMA_MODEL` | Ollama model for transform | `gemma3:12b` / `qwen2.5:14b` |
 | `WHISPER_PTT_COPY_TO_CLIPBOARD` | Copy result to clipboard | `true` |
 | `WHISPER_PTT_PASTE_TO_ACTIVE_WINDOW` | Paste into focused window | `true` |
 | `WHISPER_PTT_CLIPBOARD_AFTER_PASTE_POLICY` | After paste: `restore`, `clear`, or `preserve` | `restore` |
@@ -85,7 +85,7 @@ All settings are read from `WHISPER_PTT_*` environment variables or a `.env` fil
 |----------|-------------|---------|
 | `WHISPER_PTT_WHISPER_INITIAL_PROMPT` | Whisper initial prompt (language hint) | `English speech.` |
 | `WHISPER_PTT_OLLAMA_URL` | Ollama API URL | `http://localhost:11434/api/generate` |
-| `WHISPER_PTT_LLM_CLEANUP_PROMPT` | Custom LLM prompt (`{detected_lang}`, `{raw_text}` placeholders) | built-in |
+| `WHISPER_PTT_LLM_TRANSFORM_PROMPT` | Custom LLM prompt (`{detected_lang}`, `{raw_text}` placeholders) | built-in |
 | `WHISPER_PTT_SAMPLE_RATE` | Audio sample rate (Hz) | `16000` |
 | `WHISPER_PTT_CHUNK_SIZE` | Audio chunk size | `1024` |
 | `WHISPER_PTT_PREBUFFER_SEC` | Prebuffer duration (captures the first word) | `0.5` |
@@ -101,7 +101,7 @@ All settings are read from `WHISPER_PTT_*` environment variables or a `.env` fil
 
 Default hotkey: **Alt** (Windows/Linux) or **Option** (macOS). Hold to record, release to transcribe. Exit with **Esc** or Ctrl+C. The defaults are convenient but can interfere with other shortcuts — consider remapping to `pause` or a combo like `option+f2` via `WHISPER_PTT_HOTKEY`.
 
-With LLM cleanup enabled, the raw transcription is passed through Ollama before pasting. This can be used for grammar correction, reformatting, or translation via a custom prompt.
+With LLM transform enabled, the raw transcription is passed through Ollama before pasting. What the LLM does is entirely controlled by the prompt — grammar cleanup, email formatting, translation, or any other text transformation.
 
 ---
 
