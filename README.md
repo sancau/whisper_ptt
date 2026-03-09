@@ -117,6 +117,7 @@ cp .env.example-apple-silicon .env         # macOS Apple Silicon
 | `WHISPER_PTT_PREBUFFER_SEC` | Prebuffer duration (captures the first word) | `0.5` |
 | `WHISPER_PTT_PADDING_SEC` | Silence padding before Whisper | `0.2` |
 | `WHISPER_PTT_MIN_FRAMES` | Min frames to process (skip accidental taps) | `5` |
+| `WHISPER_PTT_SILENCE_AMPLITUDE` | Simple silence gate: if max int16 amplitude is below this, treat audio as silence and skip transcription | `750` |
 
 </details>
 

@@ -19,6 +19,7 @@ import keyboard
 import pyaudio
 import pyperclip
 import requests
+import numpy as np
 from faster_whisper import WhisperModel
 
 # Load .env from script directory (so it works regardless of CWD)
@@ -111,6 +112,8 @@ AUDIO_FORMAT = pyaudio.paInt16
 PREBUFFER_SEC = _env("PREBUFFER_SEC", "0.5", type_=float)
 PADDING_SEC = _env("PADDING_SEC", "0.2", type_=float)
 MIN_FRAMES = _env("MIN_FRAMES", "5", type_=int)
+# Simple silence gate: max int16 amplitude below this is treated as silence.
+SILENCE_AMPLITUDE_THRESHOLD = _env("SILENCE_AMPLITUDE", "750", type_=int)
 
 
 # -----------------------------------------------------------------------------
@@ -310,9 +313,16 @@ def stop_recording_and_process():
     duration_sec = len(frames) * CHUNK_SIZE / SAMPLE_RATE
     print(f"⏹️ Recorded {duration_sec:.1f}s (with {PREBUFFER_SEC}s prebuffer)")
 
-    # Only process recordings longer than 1 second in total.
+    # Only process recordings longer than 0.7 seconds in total.
     if duration_sec <= 0.7 or len(frames) < MIN_FRAMES:
         print("❌ Recording too short")
+        return
+
+    # Simple silence / noise gate: skip very low-energy audio.
+    raw = b"".join(frames)
+    audio_int16 = np.frombuffer(raw, dtype=np.int16)
+    if audio_int16.size == 0 or np.max(np.abs(audio_int16)) < SILENCE_AMPLITUDE_THRESHOLD:
+        print("❌ Audio too quiet / silence, skipping")
         return
 
     threading.Thread(target=_process_recorded_frames, args=(frames,), daemon=True).start()
