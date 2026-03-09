@@ -70,8 +70,8 @@ if "+" in HOTKEY:
 else:
     HOTKEY_MODIFIER, HOTKEY_KEY = None, HOTKEY
 
-# LLM cleanup (Ollama)
-USE_LLM_CLEANUP = _env("USE_LLM_CLEANUP", "true", type_=bool)
+# LLM cleanup (Ollama) — optional, OFF by default
+USE_LLM_CLEANUP = _env("USE_LLM_CLEANUP", "false", type_=bool)
 OLLAMA_MODEL = _env("OLLAMA_MODEL", "gemma3:12b")
 OLLAMA_URL = _env("OLLAMA_URL", "http://localhost:11434/api/generate")
 DEFAULT_LLM_CLEANUP_PROMPT = """Fix the following speech-to-text transcription. Rules:

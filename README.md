@@ -13,7 +13,7 @@ Hold a hotkey → speak → release → text appears. That's it.
 
 ## Why?
 
-Voice-to-text tools shouldn't require blind trust. **Whisper-PTT** is a **single-file push-to-talk** utility: it turns your speech into text locally with Whisper, then optionally polishes it with an LLM pass (Ollama) — cleaning up filler words, fixing grammar, and adding punctuation. Both steps run fully offline; nothing leaves your machine. The whole source is short enough to read over coffee — you can verify exactly where your audio goes. **Hold a hotkey → speak → release** → clean text appears in your active window (or clipboard). That's it.
+Voice-to-text tools shouldn't require blind trust. **Whisper-PTT** is a **single-file push-to-talk** utility: it turns your speech into text locally with Whisper, then (optionally) runs a cleanup pass with a local LLM (Ollama) — cleaning up filler words, fixing grammar, and adding punctuation. Both steps run fully offline; nothing leaves your machine. The whole source is short enough to read over coffee — you can verify exactly where your audio goes. **Core behavior:** hold a hotkey → speak → release → raw Whisper text appears in your active window (or clipboard). LLM cleanup is an extra layer you can enable if you want more polished output.
 
 **PyPI?**
 
@@ -70,14 +70,14 @@ python whisper_ptt_apple_silicon.py
 
 On first run, macOS will prompt for **Accessibility** and **Input Monitoring** permissions for your terminal app so it can listen for global hotkeys and send paste keystrokes. Grant those, and run **without** `sudo`. The first run downloads the Whisper model from HuggingFace (mlx-community). Inference runs on Metal — no CUDA needed.
 
-### (Optional) Ollama for LLM cleanup
+### (Optional) Ollama for LLM cleanup (disabled by default)
 
 ```bash
 # Install: https://ollama.com/download
 ollama pull gemma3:12b
 ```
 
-Skip this and set `WHISPER_PTT_USE_LLM_CLEANUP=false` in `.env` if you only want raw Whisper output.
+By default, **LLM cleanup is off** — you get **raw Whisper text**, and you don't need Ollama installed. Turn it on later if you want extra polish.
 
 ---
 
@@ -97,7 +97,7 @@ cp .env.example-apple-silicon .env         # macOS Apple Silicon
 | `WHISPER_PTT_WHISPER_MODEL` | Whisper model (`tiny`, `base`, `small`, `medium`, `large-v3`, `large-v3-turbo`) | `large-v3` (CUDA), `large-v3-turbo` (Apple Silicon) |
 | `WHISPER_PTT_WHISPER_LANGUAGE` | Whisper language code (`en`, `ru`, `de`, `fr`, …) | `en` |
 | `WHISPER_PTT_HOTKEY` | Hotkey (hold to record). Combos like `alt+f12` also work. | `alt` (CUDA), `option` (Apple Silicon) |
-| `WHISPER_PTT_USE_LLM_CLEANUP` | LLM cleanup on/off | `true` |
+| `WHISPER_PTT_USE_LLM_CLEANUP` | LLM cleanup on/off | `false` |
 | `WHISPER_PTT_OLLAMA_MODEL` | Ollama model for cleanup | `gemma3:12b` |
 | `WHISPER_PTT_COPY_TO_CLIPBOARD` | Copy result to clipboard | `true` |
 | `WHISPER_PTT_PASTE_TO_ACTIVE_WINDOW` | Paste into the focused window | `true` |
@@ -131,6 +131,10 @@ Default hotkey: **Alt** (Windows/Linux) or **Option** (macOS). Hold → speak �
 - **Chats / AI assistants** — speak a message, get it pasted and sent (Cursor, Slack, Discord).
 - **Any text field** — focus the field, hold hotkey, speak, release.
 - **Offline / privacy** — all processing local; no data sent to third parties.
+- **(Optional) LLM cleanup** — when enabled, use a local Ollama model to:
+  - turn spoken notes into **documentation-style** or email-ready text,
+  - do **on-the-go translation / bilingual workflows** (e.g. speak in one language, get output in another via a custom prompt),
+  - clean up prompts before sending them to other **chat/AI assistants**.
 
 ---
 
