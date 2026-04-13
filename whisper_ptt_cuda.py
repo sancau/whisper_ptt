@@ -280,10 +280,11 @@ def paste_to_front(text):
             keyboard.send(KEYS_AFTER_PASTE)
         suffix = f' + "{KEYS_AFTER_PASTE.upper()}"' if KEYS_AFTER_PASTE else ""
         print(f"✅ Pasted to active window{suffix}!")
-        if CLIPBOARD_AFTER_PASTE_POLICY == "restore":
-            pyperclip.copy(old)
-        elif CLIPBOARD_AFTER_PASTE_POLICY == "clear":
-            pyperclip.copy("")
+        if not COPY_TO_CLIPBOARD:
+            if CLIPBOARD_AFTER_PASTE_POLICY == "restore":
+                pyperclip.copy(old)
+            elif CLIPBOARD_AFTER_PASTE_POLICY == "clear":
+                pyperclip.copy("")
 
 
 # -----------------------------------------------------------------------------

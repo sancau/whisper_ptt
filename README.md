@@ -26,8 +26,8 @@ GPU acceleration is required — there is no CPU-only mode. One self-contained s
 ### Windows / Linux (NVIDIA CUDA)
 
 ```bash
-git clone https://github.com/sancau/whisper-ptt.git
-cd whisper-ptt
+git clone https://github.com/sancau/whisper_ptt.git
+cd whisper_ptt
 python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements-cuda.txt
@@ -40,8 +40,8 @@ On Linux, the `keyboard` library needs root for global hotkeys: `sudo python whi
 ### macOS (Apple Silicon)
 
 ```bash
-git clone https://github.com/sancau/whisper-ptt.git
-cd whisper-ptt
+git clone https://github.com/sancau/whisper_ptt.git
+cd whisper_ptt
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements-apple-silicon.txt
