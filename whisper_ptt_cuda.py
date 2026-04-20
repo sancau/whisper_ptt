@@ -11,6 +11,8 @@ Optional: Ollama for LLM transform.
 
 import io
 import os
+import shutil
+import subprocess
 import wave
 import time
 import threading
@@ -101,6 +103,21 @@ if CLIPBOARD_AFTER_PASTE_POLICY not in ("restore", "clear", "preserve"):
 KEYS_AFTER_PASTE = _env("KEYS_AFTER_PASTE", "enter").strip().lower()
 if KEYS_AFTER_PASTE in ("", "none"):
     KEYS_AFTER_PASTE = None
+
+# Paste shortcut (sent via `keyboard.send` after clipboard is set).
+# Terminals (Konsole, xterm, gnome-terminal, etc.) need Ctrl+Shift+V because
+# plain Ctrl+V in readline is `quoted-insert` and produces garbage characters.
+DEFAULT_PASTE_SHORTCUT = _env("PASTE_SHORTCUT", "ctrl+v").strip().lower()
+TERMINAL_PASTE_SHORTCUT = _env("TERMINAL_PASTE_SHORTCUT", "ctrl+shift+v").strip().lower()
+AUTO_DETECT_TERMINAL = _env("AUTO_DETECT_TERMINAL", "true", type_=bool)
+
+# WM_CLASS values reported by common X11 terminal emulators (lowercase).
+TERMINAL_WM_CLASSES = {
+    "konsole", "yakuake", "xterm", "uxterm", "urxvt", "rxvt",
+    "gnome-terminal", "gnome-terminal-server", "terminator",
+    "tilix", "xfce4-terminal", "alacritty", "kitty", "wezterm",
+    "st-256color", "st", "qterminal", "lxterminal", "kgx",
+}
 
 # Audio
 MIC_SAMPLE_RATE = 48000  # Hardware sample rate (USB mic supports 44100/48000)
@@ -300,6 +317,45 @@ def transform_with_llm(raw_text, detected_lang):
 # Output: clipboard and/or paste to active window
 # -----------------------------------------------------------------------------
 
+def _active_window_class():
+    """Return lowercase WM_CLASS of the active X11 window, or None on failure."""
+    if not shutil.which("xprop"):
+        return None
+    try:
+        root = subprocess.run(
+            ["xprop", "-root", "_NET_ACTIVE_WINDOW"],
+            capture_output=True, text=True, timeout=0.3,
+        ).stdout
+    except Exception:
+        return None
+    parts = root.strip().split()
+    if not parts:
+        return None
+    wid = parts[-1]
+    if not wid.startswith("0x"):
+        return None
+    try:
+        wm = subprocess.run(
+            ["xprop", "-id", wid, "WM_CLASS"],
+            capture_output=True, text=True, timeout=0.3,
+        ).stdout
+    except Exception:
+        return None
+    return wm.lower()
+
+
+def _detect_paste_shortcut():
+    """Pick paste shortcut based on active window class. Fallback to default."""
+    if not AUTO_DETECT_TERMINAL:
+        return DEFAULT_PASTE_SHORTCUT
+    wm = _active_window_class()
+    if wm is None:
+        return DEFAULT_PASTE_SHORTCUT
+    if any(cls in wm for cls in TERMINAL_WM_CLASSES):
+        return TERMINAL_PASTE_SHORTCUT
+    return DEFAULT_PASTE_SHORTCUT
+
+
 def paste_to_front(text):
     """Copy to clipboard and/or paste to active window (Ctrl+V). If KEYS_AFTER_PASTE set, send that key(s) after paste."""
     if not text.strip():
@@ -313,13 +369,14 @@ def paste_to_front(text):
     if COPY_TO_CLIPBOARD:
         print("📋 Copied to clipboard!")
     if PASTE_TO_ACTIVE_WINDOW:
-        keyboard.send("ctrl+v")
+        shortcut = _detect_paste_shortcut()
+        keyboard.send(shortcut)
         time.sleep(0.1)
         if KEYS_AFTER_PASTE:
             time.sleep(0.05)
             keyboard.send(KEYS_AFTER_PASTE)
         suffix = f' + "{KEYS_AFTER_PASTE.upper()}"' if KEYS_AFTER_PASTE else ""
-        print(f"✅ Pasted to active window{suffix}!")
+        print(f'✅ Pasted to active window via "{shortcut.upper()}"{suffix}!')
         if CLIPBOARD_AFTER_PASTE_POLICY == "restore":
             pyperclip.copy(old)
         elif CLIPBOARD_AFTER_PASTE_POLICY == "clear":
@@ -408,6 +465,10 @@ def _format_banner():
         line(f"     Paste to active window: {'ON' if PASTE_TO_ACTIVE_WINDOW else 'OFF'}") + "\n",
     ]
     if PASTE_TO_ACTIVE_WINDOW:
+        if AUTO_DETECT_TERMINAL:
+            parts.append(line(f'     Paste shortcut: "{DEFAULT_PASTE_SHORTCUT.upper()}" / "{TERMINAL_PASTE_SHORTCUT.upper()}" in terminals (auto-detect)') + "\n")
+        else:
+            parts.append(line(f'     Paste shortcut: "{DEFAULT_PASTE_SHORTCUT.upper()}"') + "\n")
         parts.append((line(f'     Keys after paste: "{KEYS_AFTER_PASTE.upper()}"') if KEYS_AFTER_PASTE else line("     Keys after paste: —")) + "\n")
     parts.extend([line("") + "\n", line('     "CTRL+C" to exit') + "\n", "╚" + "═" * w + "╝"])
     return "".join(parts)
