@@ -103,7 +103,8 @@ if KEYS_AFTER_PASTE in ("", "none"):
     KEYS_AFTER_PASTE = None
 
 # Audio
-SAMPLE_RATE = _env("SAMPLE_RATE", "16000", type_=int)
+MIC_SAMPLE_RATE = 48000  # Hardware sample rate (USB mic supports 44100/48000)
+SAMPLE_RATE = _env("SAMPLE_RATE", "16000", type_=int)  # Whisper target rate
 CHANNELS = 1
 CHUNK_SIZE = _env("CHUNK_SIZE", "1024", type_=int)
 AUDIO_FORMAT = pyaudio.paInt16
@@ -122,6 +123,24 @@ SILENCE_AMPLITUDE_THRESHOLD = _env("SILENCE_AMPLITUDE", "750", type_=int)
 
 def _setup_cuda_dll_path():
     """Add nvidia.cublas/cudnn/cuda_runtime bin dirs to PATH for DLL loading."""
+    cuda_paths = [
+        "/usr/local/cuda/lib64",
+        "/usr/local/cuda-12/lib64",
+        "/usr/lib/x86_64-linux-gnu",
+    ]
+    for path in cuda_paths:
+        if os.path.isdir(path):
+            try:
+                os.add_dll_directory(path)
+            except Exception:
+                pass
+
+    cuda_lib = os.environ.get("LD_LIBRARY_PATH", "")
+    for path in cuda_paths:
+        if path not in cuda_lib:
+            cuda_lib += os.pathsep + path
+    os.environ["LD_LIBRARY_PATH"] = cuda_lib
+
     for name in ("nvidia.cublas", "nvidia.cudnn", "nvidia.cuda_runtime"):
         try:
             mod = __import__(name, fromlist=[""])
@@ -161,8 +180,9 @@ def _open_microphone_stream():
     return _pyaudio_instance.open(
         format=AUDIO_FORMAT,
         channels=CHANNELS,
-        rate=SAMPLE_RATE,
+        rate=MIC_SAMPLE_RATE,
         input=True,
+        input_device_index=0,  # USB PnP Sound Device
         frames_per_buffer=CHUNK_SIZE,
     )
 
@@ -184,6 +204,23 @@ def prebuffer_worker():
     stream.close()
 
 
+def _resample_audio(audio_int16, src_rate, dst_rate):
+    """Simple linear resampling from src_rate to dst_rate."""
+    if src_rate == dst_rate:
+        return audio_int16
+    ratio = src_rate / dst_rate
+    n_dst = int(len(audio_int16) / ratio)
+    if n_dst == 0:
+        return audio_int16
+    indices = np.arange(n_dst) * ratio
+    indices_floor = indices.astype(np.int32)
+    indices_ceil = np.minimum(indices_floor + 1, len(audio_int16) - 1)
+    frac = indices - indices_floor
+    audio_float = audio_int16.astype(np.float32)
+    resampled = audio_float[indices_floor] * (1 - frac) + audio_float[indices_ceil] * frac
+    return resampled.astype(np.int16)
+
+
 def start_recording():
     """Start recording: copy prebuffer into _audio_frames; _recording flag lets worker append."""
     global _recording, _audio_frames
@@ -195,16 +232,19 @@ def start_recording():
 
 def frames_to_wav(frames, prepend_silence_sec=0):
     """Bytes frames list → WAV in memory (BytesIO). Optionally prepend silence."""
+    raw = b"".join(frames)
+    audio_int16 = np.frombuffer(raw, dtype=np.int16)
+    audio_resampled = _resample_audio(audio_int16, MIC_SAMPLE_RATE, SAMPLE_RATE)
     if prepend_silence_sec > 0:
         sample_width = _pyaudio_instance.get_sample_size(AUDIO_FORMAT)
         silence_len = int(prepend_silence_sec * SAMPLE_RATE) * sample_width
-        frames = [b"\x00" * silence_len] + list(frames)
+        audio_resampled = np.concatenate([np.zeros(silence_len // sample_width, dtype=np.int16), audio_resampled])
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wav:
         wav.setnchannels(CHANNELS)
         wav.setsampwidth(_pyaudio_instance.get_sample_size(AUDIO_FORMAT))
         wav.setframerate(SAMPLE_RATE)
-        wav.writeframes(b"".join(frames))
+        wav.writeframes(audio_resampled.tobytes())
     buf.seek(0)
     return buf
 
@@ -291,9 +331,18 @@ def paste_to_front(text):
 # -----------------------------------------------------------------------------
 
 def _process_recorded_frames(frames):
-    """Pipeline: frames → WAV → Whisper → optional LLM → paste."""
-    wav = frames_to_wav(frames, prepend_silence_sec=PADDING_SEC)
-    raw_text, lang = transcribe(wav)
+    """Pipeline: frames → resample → WAV → Whisper → optional LLM → paste."""
+    raw = b"".join(frames)
+    audio_int16 = np.frombuffer(raw, dtype=np.int16)
+    audio_int16 = _resample_audio(audio_int16, MIC_SAMPLE_RATE, SAMPLE_RATE)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav:
+        wav.setnchannels(CHANNELS)
+        wav.setsampwidth(_pyaudio_instance.get_sample_size(AUDIO_FORMAT))
+        wav.setframerate(SAMPLE_RATE)
+        wav.writeframes(audio_int16.tobytes())
+    buf.seek(0)
+    raw_text, lang = transcribe(buf)
     if USE_LLM_TRANSFORM and raw_text.strip():
         final_text = transform_with_llm(raw_text, lang)
     else:
@@ -310,7 +359,7 @@ def stop_recording_and_process():
     time.sleep(0.15)
 
     frames = list(_audio_frames)
-    duration_sec = len(frames) * CHUNK_SIZE / SAMPLE_RATE
+    duration_sec = len(frames) * CHUNK_SIZE / MIC_SAMPLE_RATE
     print(f"⏹️ Recorded {duration_sec:.1f}s (with {PREBUFFER_SEC}s prebuffer)")
 
     # Only process recordings longer than 0.7 seconds in total.
@@ -321,8 +370,9 @@ def stop_recording_and_process():
     # Simple silence / noise gate: skip very low-energy audio.
     raw = b"".join(frames)
     audio_int16 = np.frombuffer(raw, dtype=np.int16)
+    audio_int16 = _resample_audio(audio_int16, MIC_SAMPLE_RATE, SAMPLE_RATE)
     if audio_int16.size == 0 or np.max(np.abs(audio_int16)) < SILENCE_AMPLITUDE_THRESHOLD:
-        print("❌ Audio too quiet / silence, skipping")
+        print(f"❌ Audio too quiet / silence, skipping (max={np.max(np.abs(audio_int16))}, threshold={SILENCE_AMPLITUDE_THRESHOLD})")
         return
 
     threading.Thread(target=_process_recorded_frames, args=(frames,), daemon=True).start()
