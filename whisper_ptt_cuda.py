@@ -17,6 +17,7 @@ import wave
 import time
 import threading
 import collections
+from typing import overload
 import keyboard
 import pyaudio
 import pyperclip
@@ -39,7 +40,17 @@ except ImportError:
         print()
 
 
-def _env(key, default, *, type_=str):
+@overload
+def _env(key: str, default: str, *, type_: type[str] = str) -> str: ...
+@overload
+def _env(key: str, default: str, *, type_: type[bool]) -> bool: ...
+@overload
+def _env(key: str, default: str, *, type_: type[int]) -> int: ...
+@overload
+def _env(key: str, default: str, *, type_: type[float]) -> float: ...
+
+
+def _env(key: str, default: str, *, type_: type = str):
     """Read env var with type coercion. WHISPER_PTT_ prefix is optional."""
     full_key = key if key.startswith("WHISPER_PTT_") else f"WHISPER_PTT_{key}"
     raw = os.environ.get(full_key, os.environ.get(key, default))
@@ -125,6 +136,10 @@ SAMPLE_RATE = _env("SAMPLE_RATE", "16000", type_=int)  # Whisper target rate
 CHANNELS = 1
 CHUNK_SIZE = _env("CHUNK_SIZE", "1024", type_=int)
 AUDIO_FORMAT = pyaudio.paInt16
+INPUT_DEVICE_INDEX = _env("INPUT_DEVICE_INDEX", "").strip()
+INPUT_DEVICE_NAME = _env("INPUT_DEVICE_NAME", "").strip().lower()
+AUTO_SELECT_INPUT_DEVICE = _env("AUTO_SELECT_INPUT_DEVICE", "true", type_=bool)
+LIST_AUDIO_DEVICES = _env("LIST_AUDIO_DEVICES", "false", type_=bool)
 
 # Prebuffer and padding
 PREBUFFER_SEC = _env("PREBUFFER_SEC", "0.5", type_=float)
@@ -178,11 +193,11 @@ _setup_cuda_dll_path()
 
 _recording = False
 _audio_frames = []
-_prebuffer_deque = None
+_prebuffer_deque: collections.deque[bytes] | None = None
 _prebuffer_lock = threading.Lock()
 _prebuffer_running = True
-_pyaudio_instance = None
-_whisper_model = None
+_pyaudio_instance: pyaudio.PyAudio | None = None
+_whisper_model: WhisperModel | None = None
 
 
 def _prebuffer_size():
@@ -193,13 +208,81 @@ def _prebuffer_size():
 # Audio: prebuffer and WAV
 # -----------------------------------------------------------------------------
 
+def _input_devices():
+    """Return PyAudio input devices visible in the current runtime."""
+    devices = []
+    if _pyaudio_instance is None:
+        return devices
+    for index in range(_pyaudio_instance.get_device_count()):
+        try:
+            info = _pyaudio_instance.get_device_info_by_index(index)
+        except Exception:
+            continue
+        if int(info.get("maxInputChannels", 0)) <= 0:
+            continue
+        devices.append(info)
+    return devices
+
+
+def _print_input_devices():
+    devices = _input_devices()
+    if not devices:
+        print("❌ No input audio devices found.")
+        return
+    print("🎚️ Input audio devices visible to this process:")
+    for info in devices:
+        index = int(info["index"])
+        name = info["name"]
+        channels = int(info.get("maxInputChannels", 0))
+        rate = int(float(info.get("defaultSampleRate", 0)))
+        print(f"  [{index}] {name} (inputs={channels}, default_rate={rate})")
+
+
+def _auto_select_input_device_index():
+    if not AUTO_SELECT_INPUT_DEVICE:
+        return None
+    preferred_tokens = ("usb pnp", "usb", "microphone", "mic", "capture")
+    ignored_tokens = ("pulse", "default", "sysdefault")
+    for token in preferred_tokens:
+        for info in _input_devices():
+            name = str(info.get("name", "")).lower()
+            if token not in name:
+                continue
+            if any(ignored in name for ignored in ignored_tokens):
+                continue
+            return int(info["index"])
+    return None
+
+
+def _resolve_input_device_index():
+    if INPUT_DEVICE_INDEX:
+        try:
+            return int(INPUT_DEVICE_INDEX)
+        except ValueError:
+            raise SystemExit(f"Invalid config: INPUT_DEVICE_INDEX must be an integer (got {INPUT_DEVICE_INDEX!r}).")
+    if not INPUT_DEVICE_NAME:
+        return _auto_select_input_device_index()
+    for info in _input_devices():
+        if INPUT_DEVICE_NAME in str(info.get("name", "")).lower():
+            return int(info["index"])
+    _print_input_devices()
+    raise SystemExit(f"Input device matching {INPUT_DEVICE_NAME!r} was not found.")
+
+
 def _open_microphone_stream():
+    assert _pyaudio_instance is not None
+    input_device_index = _resolve_input_device_index()
+    if input_device_index is None:
+        print("🎙️ Input device: system default")
+    else:
+        info = _pyaudio_instance.get_device_info_by_index(input_device_index)
+        print(f"🎙️ Input device: [{input_device_index}] {info['name']}")
     return _pyaudio_instance.open(
         format=AUDIO_FORMAT,
         channels=CHANNELS,
         rate=MIC_SAMPLE_RATE,
         input=True,
-        input_device_index=0,  # USB PnP Sound Device
+        input_device_index=input_device_index,
         frames_per_buffer=CHUNK_SIZE,
     )
 
@@ -207,6 +290,8 @@ def _open_microphone_stream():
 def prebuffer_worker():
     """Background thread: read mic into ring buffer; when recording, also append to _audio_frames."""
     global _recording, _audio_frames
+    assert _prebuffer_deque is not None
+    prebuffer_deque = _prebuffer_deque
     stream = _open_microphone_stream()
     while _prebuffer_running:
         try:
@@ -214,7 +299,7 @@ def prebuffer_worker():
         except Exception:
             break
         with _prebuffer_lock:
-            _prebuffer_deque.append(chunk)
+            prebuffer_deque.append(chunk)
             if _recording:
                 _audio_frames.append(chunk)
     stream.stop_stream()
@@ -241,6 +326,7 @@ def _resample_audio(audio_int16, src_rate, dst_rate):
 def start_recording():
     """Start recording: copy prebuffer into _audio_frames; _recording flag lets worker append."""
     global _recording, _audio_frames
+    assert _prebuffer_deque is not None
     with _prebuffer_lock:
         _audio_frames[:] = list(_prebuffer_deque)
     _recording = True
@@ -249,6 +335,7 @@ def start_recording():
 
 def frames_to_wav(frames, prepend_silence_sec=0):
     """Bytes frames list → WAV in memory (BytesIO). Optionally prepend silence."""
+    assert _pyaudio_instance is not None
     raw = b"".join(frames)
     audio_int16 = np.frombuffer(raw, dtype=np.int16)
     audio_resampled = _resample_audio(audio_int16, MIC_SAMPLE_RATE, SAMPLE_RATE)
@@ -272,6 +359,7 @@ def frames_to_wav(frames, prepend_silence_sec=0):
 
 def transcribe(wav_buffer):
     """Transcribe WAV with Whisper. Returns (text, language_code)."""
+    assert _whisper_model is not None
     print("🔄 Transcribing...")
     t0 = time.time()
     segments, info = _whisper_model.transcribe(
@@ -389,6 +477,7 @@ def paste_to_front(text):
 
 def _process_recorded_frames(frames):
     """Pipeline: frames → resample → WAV → Whisper → optional LLM → paste."""
+    assert _pyaudio_instance is not None
     raw = b"".join(frames)
     audio_int16 = np.frombuffer(raw, dtype=np.int16)
     audio_int16 = _resample_audio(audio_int16, MIC_SAMPLE_RATE, SAMPLE_RATE)
@@ -449,6 +538,16 @@ def _on_hotkey_release(_event=None):
     stop_recording_and_process()
 
 
+def _format_input_device_config():
+    if INPUT_DEVICE_INDEX:
+        return f"index {INPUT_DEVICE_INDEX}"
+    if INPUT_DEVICE_NAME:
+        return f'name contains "{INPUT_DEVICE_NAME}"'
+    if AUTO_SELECT_INPUT_DEVICE:
+        return "auto-select"
+    return "system default"
+
+
 def _format_banner():
     w = 70
     def line(s, width=None):
@@ -463,6 +562,7 @@ def _format_banner():
         line(f"     LLM transform: {'ON' if USE_LLM_TRANSFORM else 'OFF'}") + "\n",
         line(f"     Copy to clipboard: {'ON' if COPY_TO_CLIPBOARD else 'OFF'}") + "\n",
         line(f"     Paste to active window: {'ON' if PASTE_TO_ACTIVE_WINDOW else 'OFF'}") + "\n",
+        line(f"     Input device: {_format_input_device_config()}") + "\n",
     ]
     if PASTE_TO_ACTIVE_WINDOW:
         if AUTO_DETECT_TERMINAL:
@@ -477,6 +577,11 @@ def _format_banner():
 def main():
     global _pyaudio_instance, _whisper_model, _prebuffer_deque
 
+    _pyaudio_instance = pyaudio.PyAudio()
+    if LIST_AUDIO_DEVICES:
+        _print_input_devices()
+        return
+
     print("⏳ Loading Whisper model... (first run may download the model)")
     _whisper_model = WhisperModel(
         WHISPER_MODEL,
@@ -485,7 +590,6 @@ def main():
     )
     print("✅ Whisper loaded!")
 
-    _pyaudio_instance = pyaudio.PyAudio()
     _prebuffer_deque = collections.deque(maxlen=_prebuffer_size())
 
     print(f"🎧 Prebuffer active (last {PREBUFFER_SEC}s)")
